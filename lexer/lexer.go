@@ -3,7 +3,6 @@ package lexer
 
 import (
     "carrionlang/token"
-    "strings"
     "unicode"
 )
 
@@ -39,14 +38,6 @@ func (l *Lexer) readChar() {
 func (l *Lexer) NextToken() token.Token {
     var tok token.Token
 
-    l.skipWhitespace()
-
-    if l.ch == 0 {
-        tok.Type = token.EOF
-        tok.Literal = ""
-        return tok
-    }
-
     if l.lineStart {
         indentLevel := l.countIndent()
         lastIndent := l.indentStack[len(l.indentStack)-1]
@@ -55,6 +46,7 @@ func (l *Lexer) NextToken() token.Token {
             l.indentStack = append(l.indentStack, indentLevel)
             tok.Type = token.INDENT
             tok.Literal = ""
+            l.lineStart = false
             return tok
         }
 
@@ -65,8 +57,11 @@ func (l *Lexer) NextToken() token.Token {
             tok.Literal = ""
             return tok
         }
+
         l.lineStart = false
     }
+
+    l.skipWhitespace()
 
     switch l.ch {
     case '=':
@@ -94,22 +89,34 @@ func (l *Lexer) NextToken() token.Token {
         tok = newToken(token.ASTERISK, l.ch)
     case '/':
         tok = newToken(token.SLASH, l.ch)
+    case '<':
+        tok = newToken(token.LT, l.ch)
+    case '>':
+        tok = newToken(token.GT, l.ch)
+    case '.':
+        tok = newToken(token.DOT, l.ch)
+    case '!':
+        tok = newToken(token.BANG, l.ch) // Handle BANG token
     case '\n':
         tok.Type = token.NEWLINE
         tok.Literal = ""
         l.lineStart = true
+        return tok
+    case '"':
+        tok.Type = token.STRING
+        tok.Literal = l.readString()
+        return tok
+    case 0:
+        tok.Literal = ""
+        tok.Type = token.EOF
+        return tok
     default:
         if isLetter(l.ch) {
-            literal := l.readIdentifier()
-            tok.Type = lookupIdent(literal)
-            tok.Literal = literal
+            tok.Literal = l.readIdentifier()
+            tok.Type = lookupIdent(tok.Literal)
             return tok
         } else if isDigit(l.ch) {
             tok.Type, tok.Literal = l.readNumber()
-            return tok
-        } else if l.ch == '"' {
-            tok.Type = token.STRING
-            tok.Literal = l.readString()
             return tok
         } else {
             tok = newToken(token.ILLEGAL, l.ch)
@@ -205,4 +212,3 @@ func lookupIdent(ident string) token.TokenType {
     }
     return token.IDENT
 }
-

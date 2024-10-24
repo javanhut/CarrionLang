@@ -11,6 +11,7 @@ var (
     NULL = &object.Null{}
 )
 
+// Eval evaluates the AST nodes
 func Eval(node ast.Node, env *object.Environment) object.Object {
     switch node := node.(type) {
 
@@ -51,6 +52,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
     case *ast.SpellbookDeclaration:
         return evalSpellbookDeclaration(node, env)
 
+    case *ast.SpellDeclaration:
+        return evalSpellDeclaration(node, env)
+
     case *ast.CallExpression:
         function := Eval(node.Function, env)
         if isError(function) {
@@ -62,9 +66,19 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
         }
         return applyFunction(function, args)
 
-    default:
-        return nil
+    case *ast.ReturnStatement:
+        val := Eval(node.ReturnValue, env)
+        if isError(val) {
+            return val
+        }
+        return &object.ReturnValue{Value: val}
+
+    case *ast.MemberExpression:
+        return evalMemberExpression(node, env)
+
+    // Add more cases as needed...
     }
+    return nil
 }
 
 func evalProgram(program *ast.Program, env *object.Environment) object.Object {
@@ -73,8 +87,11 @@ func evalProgram(program *ast.Program, env *object.Environment) object.Object {
     for _, statement := range program.Statements {
         result = Eval(statement, env)
 
-        if returnValue, ok := result.(*object.ReturnValue); ok {
-            return returnValue.Value
+        switch result := result.(type) {
+        case *object.ReturnValue:
+            return result.Value
+        case *object.Error:
+            return result
         }
     }
     return result
@@ -116,6 +133,9 @@ func evalIntegerInfixExpression(operator string, left, right object.Object) obje
     case "*":
         return &object.Integer{Value: leftVal * rightVal}
     case "/":
+        if rightVal == 0 {
+            return newError("division by zero")
+        }
         return &object.Integer{Value: leftVal / rightVal}
     default:
         return newError("unknown operator: %s", operator)
@@ -151,6 +171,44 @@ func evalSpellbookDeclaration(sd *ast.SpellbookDeclaration, env *object.Environm
     return classObject
 }
 
+func evalSpellDeclaration(sd *ast.SpellDeclaration, env *object.Environment) object.Object {
+    spell := &object.Function{
+        Parameters: sd.Parameters,
+        Body:       sd.Body,
+        Env:        env,
+    }
+
+    env.Set(sd.Name.Value, spell)
+    return spell
+}
+
+func evalMemberExpression(me *ast.MemberExpression, env *object.Environment) object.Object {
+    object := Eval(me.Object, env)
+    if isError(object) {
+        return object
+    }
+
+    return evalPropertyAccess(object, me.Property.Value)
+}
+
+func evalPropertyAccess(obj object.Object, property string) object.Object {
+    switch obj := obj.(type) {
+    case *object.BuiltinObject:
+        if prop, ok := obj.Properties[property]; ok {
+            return prop
+        }
+        return newError("property '%s' not found on built-in object", property)
+    case *object.Instance:
+        // Handle instance properties if needed
+        return newError("property access not implemented for instances")
+    case *object.Class:
+        // Handle class properties or methods if needed
+        return newError("property access not implemented for classes")
+    default:
+        return newError("cannot access property '%s' of type %s", property, obj.Type())
+    }
+}
+
 func evalExpressions(exps []ast.Expression, env *object.Environment) []object.Object {
     var result []object.Object
 
@@ -167,6 +225,10 @@ func evalExpressions(exps []ast.Expression, env *object.Environment) []object.Ob
 
 func applyFunction(fn object.Object, args []object.Object) object.Object {
     switch fn := fn.(type) {
+    case *object.Function:
+        extendedEnv := extendFunctionEnv(fn, args)
+        evaluated := Eval(fn.Body, extendedEnv)
+        return unwrapReturnValue(evaluated)
     case *object.Builtin:
         return fn.Fn(args...)
     default:
@@ -174,10 +236,42 @@ func applyFunction(fn object.Object, args []object.Object) object.Object {
     }
 }
 
-func DefineBuiltins(env *object.Environment) {
-    for name, builtin := range builtins {
-        env.Set(name, builtin)
+func extendFunctionEnv(fn *object.Function, args []object.Object) *object.Environment {
+    env := object.NewEnclosedEnvironment(fn.Env)
+    for paramIdx, param := range fn.Parameters {
+        if paramIdx < len(args) {
+            env.Set(param.Value, args[paramIdx])
+        } else {
+            env.Set(param.Value, NULL) // Default to NULL if not enough args
+        }
     }
+    return env
+}
+
+func unwrapReturnValue(obj object.Object) object.Object {
+    if returnValue, ok := obj.(*object.ReturnValue); ok {
+        return returnValue.Value
+    }
+    return obj
+}
+
+func DefineBuiltins(env *object.Environment) {
+    // Define 'munin' object with 'print' method
+    munin := &object.BuiltinObject{
+        Properties: map[string]object.Object{
+            "print": &object.Builtin{
+                Fn: func(args ...object.Object) object.Object {
+                    for _, arg := range args {
+                        fmt.Print(arg.Inspect())
+                    }
+                    fmt.Println()
+                    return NULL
+                },
+            },
+            // Add more methods if needed
+        },
+    }
+    env.Set("munin", munin)
 }
 
 func isError(obj object.Object) bool {
