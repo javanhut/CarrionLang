@@ -1,4 +1,5 @@
 #[derive(Debug)]
+#[derive(PartialEq)]
 pub enum TokenType {
      // Special tokens
     Illegal,
@@ -143,3 +144,11 @@ pub fn lookup_indent(ident: &str) -> TokenType {
         _      => TokenType::Illegal,
     }
 }
+
+pub fn new_token(token_type: TokenType, ch: u8) -> Token {
+    Token {
+        token_type,
+        literal: (ch as char).to_string(),
+    }
+}
+
